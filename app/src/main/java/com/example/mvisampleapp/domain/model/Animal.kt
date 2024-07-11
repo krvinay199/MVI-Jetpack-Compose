@@ -1,7 +1,8 @@
 package com.example.mvisampleapp.domain.model
 
-data class Animal (
+data class Animal(
     var name: String,
     var image: String,
-    var location: String
+    var location: String,
+    var type: String
 )
