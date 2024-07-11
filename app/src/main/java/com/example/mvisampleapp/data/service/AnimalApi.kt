@@ -5,5 +5,5 @@ import retrofit2.http.GET
 
 interface AnimalApi {
     @GET(value = "animals.json")
-    suspend fun getAnimals() : List<AnimalItem>
+    suspend fun getAnimals(): List<AnimalItem>
 }

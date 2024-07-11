@@ -3,37 +3,41 @@ package com.example.mvisampleapp.presentation.viewModel
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
-import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.example.mvisampleapp.data.repository.AnimalRepository
-import com.example.mvisampleapp.data.service.AnimalApi
+import com.example.mvisampleapp.common.Resource
+import com.example.mvisampleapp.data.repository.AnimalRepositoryImpl
 import com.example.mvisampleapp.data.service.AnimalService.api
-import com.example.mvisampleapp.presentation.MainIntent
-import com.example.mvisampleapp.presentation.MainState
+import com.example.mvisampleapp.domain.model.Animal
+import com.example.mvisampleapp.domain.usecase.AnimalsUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
-class AnimalViewModel(private val repository: AnimalRepository): ViewModel() {
+class AnimalViewModel(private val animalsUseCase: AnimalsUseCase) : ViewModel() {
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 AnimalViewModel(
-                    repository = AnimalRepository(api = api)
+                    animalsUseCase = AnimalsUseCase(repository = AnimalRepositoryImpl(api))
                 )
             }
         }
     }
 
-    val userIntent = Channel<MainIntent> { Channel.UNLIMITED }
+    val userIntentChannel = Channel<MainIntent> { Channel.UNLIMITED }
+    private val userIntent = userIntentChannel.receiveAsFlow()
 
-    var state = mutableStateOf<MainState>(MainState.Idle)
+
+    var state = mutableStateOf<AnimalsState>(AnimalsState.Idle)
         private set
 
     init {
@@ -42,7 +46,7 @@ class AnimalViewModel(private val repository: AnimalRepository): ViewModel() {
 
     private fun handleIntent() {
         viewModelScope.launch {
-            userIntent.consumeAsFlow().flowOn(Dispatchers.IO).collect { collector ->
+            userIntent.flowOn(Dispatchers.IO).collect { collector ->
                 when (collector) {
                     MainIntent.FetchAnimals -> fetchAnimals()
                 }
@@ -50,17 +54,35 @@ class AnimalViewModel(private val repository: AnimalRepository): ViewModel() {
         }
     }
 
-    private suspend fun fetchAnimals() {
-        viewModelScope.launch {
-            state.value = MainState.Loading
-            state.value = try {
-                MainState.Success(
-                    repository.getAnimals()
-                )
-            } catch (e: Exception){
-                MainState.Error(e.localizedMessage ?: "API failed")
+    private fun fetchAnimals() {
+        animalsUseCase.invoke().onStart {
+            state.value = AnimalsState.Loading
+        }.catch {
+            state.value = AnimalsState.Error("Unknown Error")
+        }.map { resoure ->
+            when (resoure) {
+                is Resource.Error -> {
+                    state.value = AnimalsState.Error("Unknown Error")
+                }
+
+                is Resource.Loading -> {
+                    state.value = AnimalsState.Loading
+                }
+
+                is Resource.Success -> {
+                    state.value = AnimalsState.Success(
+                        animals = resoure.data!!
+                    )
+                }
             }
-        }
+        }.launchIn(viewModelScope)
     }
 
+}
+
+sealed interface AnimalsState {
+    data object Idle : AnimalsState
+    data object Loading : AnimalsState
+    data class Success(val animals: List<Animal>) : AnimalsState
+    data class Error(val error: String) : AnimalsState
 }
